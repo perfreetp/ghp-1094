@@ -1,15 +1,26 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
-  Idea, Experiment, Task, ChannelRecord, Interview, Order, Material, RiskItem, RevenueDataPoint
+  Idea, Experiment, Task, ChannelRecord, Interview, Order, Material,
+  RiskItem, RevenueDataPoint, Metric,
 } from '@/types';
 import {
   initialIdeas, initialExperiments, initialTasks, initialChannelRecords,
-  initialInterviews, initialOrders, initialMaterials
+  initialInterviews, initialOrders, initialMaterials, initialMetrics,
 } from './initialData';
 import { generateId, isOverdue, isThisMonth, isToday } from '@/utils/date';
 import { calculateIdeaScore, sortIdeasByScore } from '@/utils/scoring';
 import { generateWeeklyReport } from '@/utils/report';
+import {
+  calculateBreakdown, calculateExperimentFinance, computeMetricStatus,
+  getFullRecommendation, FinanceBreakdown, FullAnalysis,
+} from '@/utils/finance';
+
+const safeDate = (d?: string | null, fallback = new Date().toISOString()) => {
+  if (!d) return fallback;
+  try { const parsed = new Date(d); if (isNaN(parsed.getTime())) return fallback; return d; }
+  catch { return fallback; }
+};
 
 interface AppState {
   ideas: Idea[];
@@ -19,6 +30,7 @@ interface AppState {
   interviews: Interview[];
   orders: Order[];
   materials: Material[];
+  metrics: Metric[];
 
   addIdea: (idea: Omit<Idea, 'id' | 'createdAt'>) => void;
   updateIdea: (id: string, data: Partial<Idea>) => void;
@@ -50,8 +62,15 @@ interface AppState {
   updateMaterial: (id: string, data: Partial<Material>) => void;
   deleteMaterial: (id: string) => void;
 
+  addMetric: (metric: Omit<Metric, 'id'>) => void;
+  updateMetric: (id: string, data: Partial<Metric>) => void;
+  deleteMetric: (id: string) => void;
+
+  getFinance: (scope?: 'all' | 'month' | 'week') => FinanceBreakdown;
+  getExperimentFinance: (expId: string | null) => FinanceBreakdown;
   getTotalRevenue: () => number;
   getMonthlyRevenue: () => number;
+  getMonthlyProfit: () => number;
   getActiveExperiments: () => Experiment[];
   getTodayTasks: () => Task[];
   getOverdueTasks: () => Task[];
@@ -60,12 +79,16 @@ interface AppState {
   getExperimentById: (id: string) => Experiment | undefined;
   getTasksByExperiment: (expId: string) => Task[];
   getOrdersByExperiment: (expId: string) => Order[];
+  getMetricsByExperiment: (expId: string) => Metric[];
+  getChannelsByExperiment: (expId: string) => ChannelRecord[];
+  getInterviewsByExperiment: (expId: string) => Interview[];
   getExperimentProfit: (expId: string) => number;
+  getExperimentAnalysis: (expId: string) => FullAnalysis | null;
   exportWeeklyReport: () => string;
   resetAllData: () => void;
 }
 
-const STORAGE_KEY = 'side-hustle-lab-store';
+const STORAGE_KEY = 'side-hustle-lab-store-v2';
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -77,15 +100,12 @@ export const useAppStore = create<AppState>()(
       interviews: initialInterviews,
       orders: initialOrders,
       materials: initialMaterials,
+      metrics: initialMetrics,
 
       addIdea: (idea) =>
         set((state) => ({
           ideas: [
-            {
-              ...idea,
-              id: generateId(),
-              createdAt: new Date().toISOString(),
-            },
+            { ...idea, id: generateId(), createdAt: new Date().toISOString() },
             ...state.ideas,
           ],
         })),
@@ -128,13 +148,23 @@ export const useAppStore = create<AppState>()(
 
       addExperiment: (exp) =>
         set((state) => ({
-          experiments: [{ ...exp, id: generateId() }, ...state.experiments],
+          experiments: [
+            { ...exp, id: generateId(), startDate: safeDate(exp.startDate), endDate: safeDate(exp.endDate) },
+            ...state.experiments,
+          ],
         })),
 
       updateExperiment: (id, data) =>
         set((state) => ({
           experiments: state.experiments.map((e) =>
-            e.id === id ? { ...e, ...data } : e
+            e.id === id
+              ? {
+                  ...e,
+                  ...data,
+                  startDate: data.startDate !== undefined ? safeDate(data.startDate, e.startDate) : e.startDate,
+                  endDate: data.endDate !== undefined ? safeDate(data.endDate, e.endDate) : e.endDate,
+                }
+              : e
           ),
         })),
 
@@ -144,16 +174,28 @@ export const useAppStore = create<AppState>()(
           tasks: state.tasks.map((t) =>
             t.experimentId === id ? { ...t, experimentId: null } : t
           ),
+          metrics: state.metrics.filter((m) => m.experimentId !== id),
         })),
 
       addTask: (task) =>
         set((state) => ({
-          tasks: [{ ...task, id: generateId() }, ...state.tasks],
+          tasks: [
+            { ...task, id: generateId(), dueDate: safeDate(task.dueDate) },
+            ...state.tasks,
+          ],
         })),
 
       updateTask: (id, data) =>
         set((state) => ({
-          tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...data } : t)),
+          tasks: state.tasks.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  ...data,
+                  dueDate: data.dueDate !== undefined ? safeDate(data.dueDate, t.dueDate) : t.dueDate,
+                }
+              : t
+          ),
         })),
 
       toggleTaskComplete: (id) =>
@@ -175,13 +217,18 @@ export const useAppStore = create<AppState>()(
 
       addChannelRecord: (record) =>
         set((state) => ({
-          channelRecords: [{ ...record, id: generateId() }, ...state.channelRecords],
+          channelRecords: [
+            { ...record, id: generateId(), date: safeDate(record.date) },
+            ...state.channelRecords,
+          ],
         })),
 
       updateChannelRecord: (id, data) =>
         set((state) => ({
           channelRecords: state.channelRecords.map((r) =>
-            r.id === id ? { ...r, ...data } : r
+            r.id === id
+              ? { ...r, ...data, date: data.date !== undefined ? safeDate(data.date, r.date) : r.date }
+              : r
           ),
         })),
 
@@ -192,13 +239,18 @@ export const useAppStore = create<AppState>()(
 
       addInterview: (interview) =>
         set((state) => ({
-          interviews: [{ ...interview, id: generateId() }, ...state.interviews],
+          interviews: [
+            { ...interview, id: generateId(), date: safeDate(interview.date) },
+            ...state.interviews,
+          ],
         })),
 
       updateInterview: (id, data) =>
         set((state) => ({
           interviews: state.interviews.map((i) =>
-            i.id === id ? { ...i, ...data } : i
+            i.id === id
+              ? { ...i, ...data, date: data.date !== undefined ? safeDate(data.date, i.date) : i.date }
+              : i
           ),
         })),
 
@@ -209,13 +261,18 @@ export const useAppStore = create<AppState>()(
 
       addOrder: (order) =>
         set((state) => ({
-          orders: [{ ...order, id: generateId() }, ...state.orders],
+          orders: [
+            { ...order, id: generateId(), date: safeDate(order.date) },
+            ...state.orders,
+          ],
         })),
 
       updateOrder: (id, data) =>
         set((state) => ({
           orders: state.orders.map((o) =>
-            o.id === id ? { ...o, ...data } : o
+            o.id === id
+              ? { ...o, ...data, date: data.date !== undefined ? safeDate(data.date, o.date) : o.date }
+              : o
           ),
         })),
 
@@ -227,11 +284,7 @@ export const useAppStore = create<AppState>()(
       addMaterial: (material) =>
         set((state) => ({
           materials: [
-            {
-              ...material,
-              id: generateId(),
-              createdAt: new Date().toISOString(),
-            },
+            { ...material, id: generateId(), createdAt: new Date().toISOString() },
             ...state.materials,
           ],
         })),
@@ -248,39 +301,64 @@ export const useAppStore = create<AppState>()(
           materials: state.materials.filter((m) => m.id !== id),
         })),
 
-      getTotalRevenue: () => {
-        const { orders } = get();
-        const sales = orders
-          .filter((o) => o.type === 'sale')
-          .reduce((s, o) => s + o.amount, 0);
-        const refunds = orders
-          .filter((o) => o.type === 'refund')
-          .reduce((s, o) => s + o.amount, 0);
-        return sales - refunds;
-      },
+      addMetric: (metric) =>
+        set((state) => ({
+          metrics: [
+            {
+              ...metric,
+              id: generateId(),
+              deadline: metric.deadline ? safeDate(metric.deadline) : undefined,
+            },
+            ...state.metrics,
+          ],
+        })),
 
-      getMonthlyRevenue: () => {
-        const { orders } = get();
-        const sales = orders
-          .filter((o) => o.type === 'sale' && isThisMonth(o.date))
-          .reduce((s, o) => s + o.amount, 0);
-        const refunds = orders
-          .filter((o) => o.type === 'refund' && isThisMonth(o.date))
-          .reduce((s, o) => s + o.amount, 0);
-        return sales - refunds;
-      },
+      updateMetric: (id, data) =>
+        set((state) => ({
+          metrics: state.metrics.map((m) =>
+            m.id === id
+              ? {
+                  ...m,
+                  ...data,
+                  deadline:
+                    data.deadline === undefined
+                      ? m.deadline
+                      : data.deadline
+                      ? safeDate(data.deadline)
+                      : undefined,
+                }
+              : m
+          ),
+        })),
 
-      getActiveExperiments: () => {
-        return get().experiments.filter((e) => e.status === 'in_progress');
-      },
+      deleteMetric: (id) =>
+        set((state) => ({
+          metrics: state.metrics.filter((m) => m.id !== id),
+        })),
+
+      getFinance: (scope = 'all') => calculateBreakdown(get().orders, scope),
+      getExperimentFinance: (expId) =>
+        calculateExperimentFinance(expId, get().orders),
+
+      getTotalRevenue: () => get().getFinance('all').revenue,
+      getMonthlyRevenue: () => get().getFinance('month').revenue,
+      getMonthlyProfit: () => get().getFinance('month').profit,
+
+      getActiveExperiments: () =>
+        get().experiments.filter((e) => e.status === 'in_progress'),
 
       getTodayTasks: () => {
-        return get().tasks.filter(
-          (t) => (isToday(t.dueDate) || (isOverdue(t.dueDate) && t.status !== 'completed')) && t.status !== 'completed'
-        ).sort((a, b) => {
-          const priorityWeight = { high: 0, medium: 1, low: 2 };
-          return priorityWeight[a.priority] - priorityWeight[b.priority];
-        });
+        return get()
+          .tasks.filter(
+            (t) =>
+              (isToday(t.dueDate) ||
+                (isOverdue(t.dueDate) && t.status !== 'completed')) &&
+              t.status !== 'completed'
+          )
+          .sort((a, b) => {
+            const priorityWeight = { high: 0, medium: 1, low: 2 };
+            return priorityWeight[a.priority] - priorityWeight[b.priority];
+          });
       },
 
       getOverdueTasks: () => {
@@ -309,22 +387,39 @@ export const useAppStore = create<AppState>()(
         state.experiments
           .filter((e) => e.status === 'in_progress')
           .forEach((e) => {
-            const expOrders = state.orders.filter(
-              (o) => o.experimentId === e.id
-            );
-            const revenue = expOrders
-              .filter((o) => o.type === 'sale')
-              .reduce((s, o) => s + o.amount, 0);
+            const fin = state.getExperimentFinance(e.id);
             const daysRunning = Math.floor(
               (Date.now() - new Date(e.startDate).getTime()) /
                 (1000 * 60 * 60 * 24)
             );
-            if (daysRunning > 14 && revenue === 0) {
+            if (daysRunning > 14 && fin.sales === 0) {
               risks.push({
                 id: `risk-exp-${e.id}`,
                 type: 'low_conversion',
                 level: 'high',
                 message: `实验「${e.title}」已运行${daysRunning}天仍无收入`,
+                relatedId: e.id,
+              });
+            }
+            const expMetrics = state.metrics.filter((m) => m.experimentId === e.id);
+            expMetrics.forEach((m) => {
+              const st = computeMetricStatus(m);
+              if (st === 'failed' || st === 'at_risk') {
+                risks.push({
+                  id: `risk-metric-${m.id}`,
+                  type: 'low_conversion',
+                  level: st === 'failed' ? 'high' : 'medium',
+                  message: `指标「${m.name}」${st === 'failed' ? '已失败' : '有风险'}`,
+                  relatedId: e.id,
+                });
+              }
+            });
+            if (fin.costs > 0 && fin.costs > fin.sales * 2) {
+              risks.push({
+                id: `risk-budget-${e.id}`,
+                type: 'budget_exceed',
+                level: 'high',
+                message: `实验「${e.title}」成本已超过销售收入的 2 倍`,
                 relatedId: e.id,
               });
             }
@@ -367,7 +462,8 @@ export const useAppStore = create<AppState>()(
         return result;
       },
 
-      getExperimentById: (id) => get().experiments.find((e) => e.id === id),
+      getExperimentById: (id) =>
+        get().experiments.find((e) => e.id === id),
 
       getTasksByExperiment: (expId) =>
         get().tasks.filter((t) => t.experimentId === expId),
@@ -375,18 +471,30 @@ export const useAppStore = create<AppState>()(
       getOrdersByExperiment: (expId) =>
         get().orders.filter((o) => o.experimentId === expId),
 
-      getExperimentProfit: (expId) => {
-        const expOrders = get().getOrdersByExperiment(expId);
-        const sales = expOrders
-          .filter((o) => o.type === 'sale')
-          .reduce((s, o) => s + o.amount, 0);
-        const refunds = expOrders
-          .filter((o) => o.type === 'refund')
-          .reduce((s, o) => s + o.amount, 0);
-        const costs = expOrders
-          .filter((o) => o.type === 'cost')
-          .reduce((s, o) => s + (o.cost || o.amount), 0);
-        return sales - refunds - costs;
+      getMetricsByExperiment: (expId) =>
+        get().metrics.filter((m) => m.experimentId === expId),
+
+      getChannelsByExperiment: (expId) =>
+        get().channelRecords.filter((c) => c.experimentId === expId),
+
+      getInterviewsByExperiment: (expId) =>
+        get().interviews.filter((i) => i.experimentId === expId),
+
+      getExperimentProfit: (expId) =>
+        get().getExperimentFinance(expId).profit,
+
+      getExperimentAnalysis: (expId) => {
+        const state = get();
+        const exp = state.getExperimentById(expId);
+        if (!exp) return null;
+        return getFullRecommendation({
+          experiment: exp,
+          orders: state.getOrdersByExperiment(expId),
+          tasks: state.getTasksByExperiment(expId),
+          metrics: state.getMetricsByExperiment(expId),
+          channels: state.getChannelsByExperiment(expId),
+          interviews: state.getInterviewsByExperiment(expId),
+        });
       },
 
       exportWeeklyReport: () => {
@@ -399,6 +507,7 @@ export const useAppStore = create<AppState>()(
           interviews: state.interviews,
           orders: state.orders,
           materials: state.materials,
+          metrics: state.metrics,
         });
       },
 
@@ -411,6 +520,7 @@ export const useAppStore = create<AppState>()(
           interviews: initialInterviews,
           orders: initialOrders,
           materials: initialMaterials,
+          metrics: initialMetrics,
         })),
     }),
     {

@@ -3,11 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Edit3, Save, X, Target, Users, DollarSign,
   Share2, BarChart2, CheckSquare, CalendarDays, Plus, Trash2,
-  Play, Pause, CheckCircle2, FileX, Loader
+  Play, Pause, CheckCircle2, FileX, Loader, Ruler
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { formatDate } from '@/utils/date';
-import { ExperimentStatus, TaskStage, TaskPriority, Task } from '@/types';
+import { computeMetricStatus } from '@/utils/finance';
+import { ExperimentStatus, TaskStage, TaskPriority, Task, Metric, MetricStatus } from '@/types';
 
 const statusOptions: { key: ExperimentStatus; label: string; color: string }[] = [
   { key: 'draft', label: '草稿', color: 'bg-slate-100 text-slate-600' },
@@ -35,6 +36,14 @@ const priorityStyles: Record<TaskPriority, string> = {
   low: 'bg-slate-100 text-slate-600',
 };
 
+const metricStatusStyles: Record<MetricStatus, { label: string; color: string; bar: string }> = {
+  achieved: { label: '已达标', color: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500' },
+  on_track: { label: '进行中', color: 'bg-indigo-100 text-indigo-700', bar: 'bg-indigo-500' },
+  pending: { label: '待开始', color: 'bg-slate-100 text-slate-600', bar: 'bg-slate-400' },
+  at_risk: { label: '有风险', color: 'bg-amber-100 text-amber-700', bar: 'bg-amber-500' },
+  failed: { label: '未达标', color: 'bg-coral-100 text-coral-700', bar: 'bg-coral-500' },
+};
+
 export default function ExperimentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -45,17 +54,31 @@ export default function ExperimentDetail() {
   const updateTask = useAppStore((s) => s.updateTask);
   const toggleTaskComplete = useAppStore((s) => s.toggleTaskComplete);
   const deleteTask = useAppStore((s) => s.deleteTask);
-  const getOrdersByExperiment = useAppStore((s) => s.getOrdersByExperiment);
-  const getExperimentProfit = useAppStore((s) => s.getExperimentProfit);
+  const getMetricsByExperiment = useAppStore((s) => s.getMetricsByExperiment);
+  const addMetric = useAppStore((s) => s.addMetric);
+  const updateMetric = useAppStore((s) => s.updateMetric);
+  const deleteMetric = useAppStore((s) => s.deleteMetric);
+  const getExperimentFinance = useAppStore((s) => s.getExperimentFinance);
 
-  const experiment = getExperimentById(id!);
+  const expId = id!;
+  const experiment = getExperimentById(expId);
   const tasks = id ? getTasksByExperiment(id) : [];
-  const orders = id ? getOrdersByExperiment(id) : [];
-  const profit = id ? getExperimentProfit(id) : 0;
+  const metrics = id ? getMetricsByExperiment(id) : [];
+  const finance = id ? getExperimentFinance(id) : { sales: 0, profit: 0, orderCount: 0, costs: 0, refunds: 0, revenue: 0 };
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(experiment || {} as any);
   const [newTask, setNewTask] = useState({ title: '', stage: 'preparation' as TaskStage, priority: 'medium' as TaskPriority, dueDate: '' });
+
+  const [showMetricModal, setShowMetricModal] = useState(false);
+  const [editingMetric, setEditingMetric] = useState<Metric | null>(null);
+  const [metricForm, setMetricForm] = useState({
+    name: '',
+    unit: '',
+    target: 0,
+    current: 0,
+    deadline: '',
+  });
 
   if (!experiment) {
     return (
@@ -93,8 +116,6 @@ export default function ExperimentDetail() {
     setNewTask({ title: '', stage: 'preparation', priority: 'medium', dueDate: '' });
   };
 
-  const revenue = orders.filter(o => o.type === 'sale').reduce((s, o) => s + o.amount, 0);
-  const salesCount = orders.filter(o => o.type === 'sale').length;
   const completedTasks = tasks.filter(t => t.status === 'completed').length;
   const currentStatus = statusOptions.find(s => s.key === experiment.status)!;
 
@@ -102,6 +123,54 @@ export default function ExperimentDetail() {
     preparation: tasks.filter(t => t.stage === 'preparation'),
     launch: tasks.filter(t => t.stage === 'launch'),
     followup: tasks.filter(t => t.stage === 'followup'),
+  };
+
+  const openAddMetric = () => {
+    setEditingMetric(null);
+    setMetricForm({ name: '', unit: '', target: 0, current: 0, deadline: '' });
+    setShowMetricModal(true);
+  };
+
+  const openEditMetric = (metric: Metric) => {
+    setEditingMetric(metric);
+    setMetricForm({
+      name: metric.name,
+      unit: metric.unit || '',
+      target: metric.target,
+      current: metric.current,
+      deadline: metric.deadline ? metric.deadline.split('T')[0] : '',
+    });
+    setShowMetricModal(true);
+  };
+
+  const handleSaveMetric = () => {
+    if (!metricForm.name.trim()) return;
+    if (editingMetric) {
+      updateMetric(editingMetric.id, {
+        name: metricForm.name.trim(),
+        unit: metricForm.unit.trim() || undefined,
+        target: Number(metricForm.target),
+        current: Number(metricForm.current),
+        deadline: metricForm.deadline ? new Date(metricForm.deadline).toISOString() : undefined,
+      });
+    } else {
+      const newMetric: Omit<Metric, 'id'> = {
+        experimentId: expId,
+        name: metricForm.name.trim(),
+        unit: metricForm.unit.trim() || undefined,
+        target: Number(metricForm.target),
+        current: Number(metricForm.current),
+        deadline: metricForm.deadline ? new Date(metricForm.deadline).toISOString() : undefined,
+      };
+      addMetric(newMetric);
+    }
+    setShowMetricModal(false);
+  };
+
+  const handleDeleteMetric = (metricId: string) => {
+    if (confirm('确定删除这个指标吗？')) {
+      deleteMetric(metricId);
+    }
   };
 
   return (
@@ -333,19 +402,19 @@ export default function ExperimentDetail() {
             <div className="grid grid-cols-2 gap-3">
               <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200">
                 <div className="text-xs text-emerald-600 font-medium mb-1">总收入</div>
-                <div className="text-2xl font-bold text-emerald-700 font-mono">¥{revenue.toFixed(0)}</div>
+                <div className="text-2xl font-bold text-emerald-700 font-mono">¥{finance.revenue.toFixed(0)}</div>
               </div>
               <div className={`p-4 rounded-xl border ${
-                profit >= 0
+                finance.profit >= 0
                   ? 'bg-gradient-to-br from-teal-50 to-teal-100/50 border-teal-200'
                   : 'bg-gradient-to-br from-coral-50 to-coral-100/50 border-coral-200'
               }`}>
-                <div className={`text-xs font-medium mb-1 ${profit >= 0 ? 'text-teal-600' : 'text-coral-600'}`}>净利润</div>
-                <div className={`text-2xl font-bold font-mono ${profit >= 0 ? 'text-teal-700' : 'text-coral-700'}`}>¥{profit.toFixed(0)}</div>
+                <div className={`text-xs font-medium mb-1 ${finance.profit >= 0 ? 'text-teal-600' : 'text-coral-600'}`}>净利润</div>
+                <div className={`text-2xl font-bold font-mono ${finance.profit >= 0 ? 'text-teal-700' : 'text-coral-700'}`}>¥{finance.profit.toFixed(0)}</div>
               </div>
               <div className="p-4 rounded-xl bg-gradient-to-br from-amber-50 to-amber-100/50 border border-amber-200">
                 <div className="text-xs text-amber-600 font-medium mb-1">成交订单</div>
-                <div className="text-2xl font-bold text-amber-700 font-mono">{salesCount}</div>
+                <div className="text-2xl font-bold text-amber-700 font-mono">{finance.orderCount}</div>
               </div>
               <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100/50 border border-indigo-200">
                 <div className="text-xs text-indigo-600 font-medium mb-1">任务完成</div>
@@ -354,6 +423,105 @@ export default function ExperimentDetail() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* 验证指标管理 */}
+      <div className="lab-card p-6">
+        <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h2 className="section-title">
+            <Ruler className="w-5 h-5 text-lab-indigo-500" />
+            📏 验证指标 ({metrics.length})
+          </h2>
+          <button onClick={openAddMetric} className="lab-btn-primary !py-1.5">
+            <Plus className="w-4 h-4" />
+            新增指标
+          </button>
+        </div>
+
+        {metrics.length === 0 ? (
+          <div className="text-center py-10 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+            <Ruler className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-sm text-slate-400 mb-3">还没有设置验证指标</p>
+            <button onClick={openAddMetric} className="lab-btn-secondary !py-1.5">
+              <Plus className="w-4 h-4" />
+              添加第一个指标
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {metrics.map((metric) => {
+              const status = computeMetricStatus(metric);
+              const style = metricStatusStyles[status];
+              const percent = metric.target > 0 ? Math.min(100, (metric.current / metric.target) * 100) : 0;
+              return (
+                <div
+                  key={metric.id}
+                  className="p-4 rounded-xl border border-slate-200 bg-white hover:border-lab-indigo-200 hover:shadow-sm transition-all group"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-2">
+                        <h4 className="font-semibold text-slate-800">{metric.name}</h4>
+                        <span className={`lab-badge ${style.color}`}>
+                          {style.label}
+                        </span>
+                        {metric.unit && (
+                          <span className="text-xs text-slate-400">单位：{metric.unit}</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${style.bar} rounded-full transition-all duration-500`}
+                            style={{ width: `${percent}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-mono font-semibold text-slate-700 w-12 text-right">
+                          {percent.toFixed(0)}%
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-4 flex-wrap text-xs text-slate-500">
+                        <span className="font-mono">
+                          当前：<span className="text-slate-700 font-medium">{metric.current}</span>
+                          {metric.unit ? ` ${metric.unit}` : ''}
+                        </span>
+                        <span className="font-mono">
+                          目标：<span className="text-slate-700 font-medium">{metric.target}</span>
+                          {metric.unit ? ` ${metric.unit}` : ''}
+                        </span>
+                        {metric.deadline && (
+                          <span className="flex items-center gap-1">
+                            <CalendarDays className="w-3 h-3" />
+                            截止：{formatDate(metric.deadline)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => openEditMetric(metric)}
+                        className="p-2 rounded-lg text-slate-400 hover:text-lab-indigo-600 hover:bg-lab-indigo-50 transition-all"
+                        title="编辑"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMetric(metric.id)}
+                        className="p-2 rounded-lg text-slate-400 hover:text-coral-600 hover:bg-coral-50 transition-all"
+                        title="删除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* 任务管理 */}
@@ -473,6 +641,96 @@ export default function ExperimentDetail() {
           ))}
         </div>
       </div>
+
+      {/* 新增/编辑指标弹窗 */}
+      {showMetricModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-lab-indigo-500 text-white">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <Ruler className="w-5 h-5" />
+                {editingMetric ? '编辑指标' : '新增指标'}
+              </h3>
+              <button onClick={() => setShowMetricModal(false)} className="p-1 rounded-lg hover:bg-white/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="lab-label">
+                  指标名称 <span className="text-coral-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={metricForm.name}
+                  onChange={(e) => setMetricForm({ ...metricForm, name: e.target.value })}
+                  className="lab-input"
+                  placeholder="例如：新增用户数、转化率、销售额"
+                />
+              </div>
+              <div>
+                <label className="lab-label">单位（可选）</label>
+                <input
+                  type="text"
+                  value={metricForm.unit}
+                  onChange={(e) => setMetricForm({ ...metricForm, unit: e.target.value })}
+                  className="lab-input"
+                  placeholder="例如：人、元、篇、%"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="lab-label">目标值</label>
+                  <input
+                    type="number"
+                    value={metricForm.target}
+                    onChange={(e) => setMetricForm({ ...metricForm, target: Number(e.target.value) })}
+                    className="lab-input font-mono"
+                    min="0"
+                    step="any"
+                  />
+                </div>
+                <div>
+                  <label className="lab-label">当前值</label>
+                  <input
+                    type="number"
+                    value={metricForm.current}
+                    onChange={(e) => setMetricForm({ ...metricForm, current: Number(e.target.value) })}
+                    className="lab-input font-mono"
+                    min="0"
+                    step="any"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="lab-label flex items-center gap-1">
+                  <CalendarDays className="w-3 h-3" />
+                  截止日期（可选）
+                </label>
+                <input
+                  type="date"
+                  value={metricForm.deadline}
+                  onChange={(e) => setMetricForm({ ...metricForm, deadline: e.target.value })}
+                  className="lab-input"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 bg-slate-50">
+              <button onClick={() => setShowMetricModal(false)} className="lab-btn-secondary">
+                取消
+              </button>
+              <button
+                onClick={handleSaveMetric}
+                disabled={!metricForm.name.trim()}
+                className="lab-btn-primary"
+              >
+                <Save className="w-4 h-4" />
+                {editingMetric ? '保存修改' : '新增指标'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,12 +19,17 @@ export type OrderType = 'sale' | 'refund' | 'cost';
 export type MaterialCategory = 'copywriting' | 'image' | 'quotation' | 'reply';
 export type Recommendation = 'continue' | 'pause' | 'abandon';
 
+export type MetricStatus = 'pending' | 'on_track' | 'achieved' | 'at_risk' | 'failed';
+
 export interface Metric {
   id: string;
   experimentId: string;
   name: string;
+  unit?: string;
   target: number;
   current: number;
+  deadline?: string;
+  status?: MetricStatus;
 }
 
 export interface Experiment {

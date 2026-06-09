@@ -18,6 +18,8 @@ export default function Orders() {
   const experiments = useAppStore((s) => s.experiments);
   const addOrder = useAppStore((s) => s.addOrder);
   const deleteOrder = useAppStore((s) => s.deleteOrder);
+  const getFinance = useAppStore((s) => s.getFinance);
+  const getExperimentFinance = useAppStore((s) => s.getExperimentFinance);
 
   const [showModal, setShowModal] = useState(false);
   const [filter, setFilter] = useState<OrderType | 'all'>('all');
@@ -40,45 +42,26 @@ export default function Orders() {
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [orders, filter, filterExp]);
 
-  const stats = useMemo(() => {
-    const sales = orders.filter(o => o.type === 'sale').reduce((s, o) => s + o.amount, 0);
-    const refunds = orders.filter(o => o.type === 'refund').reduce((s, o) => s + o.amount, 0);
-    const costs = orders.filter(o => o.type === 'cost').reduce((s, o) => s + (o.cost || o.amount), 0);
-    return {
-      revenue: sales - refunds,
-      profit: sales - refunds - costs,
-      costs,
-      refundRate: sales > 0 ? (refunds / sales) * 100 : 0,
-      orderCount: orders.filter(o => o.type === 'sale').length,
-      avgOrderValue: orders.filter(o => o.type === 'sale').length > 0
-        ? sales / orders.filter(o => o.type === 'sale').length : 0,
-    };
-  }, [orders]);
+  const stats = getFinance();
 
   const expStats = useMemo(() => {
-    const map: Record<string, { revenue: number; cost: number; profit: number; count: number }> = {};
-    orders.forEach(o => {
-      const key = o.experimentId || 'others';
-      if (!map[key]) map[key] = { revenue: 0, cost: 0, profit: 0, count: 0 };
-      if (o.type === 'sale') {
-        map[key].revenue += o.amount;
-        map[key].count += 1;
-        map[key].profit += o.amount;
-      } else if (o.type === 'refund') {
-        map[key].revenue -= o.amount;
-        map[key].profit -= o.amount;
-      } else if (o.type === 'cost') {
-        map[key].cost += (o.cost || o.amount);
-        map[key].profit -= (o.cost || o.amount);
-      }
-    });
-    return Object.entries(map)
-      .map(([expId, data]) => {
+    const expIds = new Set<string | null>([null, ...experiments.map(e => e.id)]);
+    orders.forEach(o => expIds.add(o.experimentId));
+    return Array.from(expIds)
+      .map((expId) => {
+        const fin = getExperimentFinance(expId);
         const exp = experiments.find(e => e.id === expId);
-        return { exp, ...data };
+        return {
+          exp,
+          revenue: fin.revenue,
+          cost: fin.costs,
+          profit: fin.profit,
+          count: fin.orderCount,
+        };
       })
+      .filter(item => item.revenue !== 0 || item.cost !== 0 || item.count !== 0)
       .sort((a, b) => b.profit - a.profit);
-  }, [orders, experiments]);
+  }, [orders, experiments, getExperimentFinance]);
 
   const handleSubmit = () => {
     if (!form.amount || Number(form.amount) <= 0) return;

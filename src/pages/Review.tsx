@@ -1,13 +1,22 @@
 import { useState, useMemo } from 'react';
 import {
   BarChart3, Check, Pause, XCircle, TrendingUp, Target,
-  ChevronRight, BarChart2, GitCompare, Sparkles, AlertCircle
+  ChevronRight, BarChart2, GitCompare, Sparkles, AlertCircle,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { getExperimentRecommendation, getRecommendationLabel } from '@/utils/scoring';
-import { Recommendation } from '@/types';
-import { Experiment } from '@/types';
+import { getRecommendationLabel } from '@/utils/scoring';
+import { Recommendation, Metric } from '@/types';
+import { FullAnalysis, RecommendationEvidence } from '@/utils/finance';
+
+const EVIDENCE_CATEGORY_META: Record<string, { emoji: string }> = {
+  finance: { emoji: '💰' },
+  tasks: { emoji: '✅' },
+  metrics: { emoji: '📏' },
+  channels: { emoji: '📣' },
+  interviews: { emoji: '🎙️' },
+};
 
 export default function Review() {
   const navigate = useNavigate();
@@ -15,10 +24,20 @@ export default function Review() {
   const orders = useAppStore((s) => s.orders);
   const tasks = useAppStore((s) => s.tasks);
   const updateExperiment = useAppStore((s) => s.updateExperiment);
+  const getExperimentAnalysis = useAppStore((s) => s.getExperimentAnalysis);
+  const getMetricsByExperiment = useAppStore((s) => s.getMetricsByExperiment);
+  const getOrdersByExperiment = useAppStore((s) => s.getOrdersByExperiment);
+  const getTasksByExperiment = useAppStore((s) => s.getTasksByExperiment);
 
   const [selectedIds, setSelectedIds] = useState<string[]>(
     experiments.filter(e => e.status === 'in_progress').slice(0, 3).map(e => e.id)
   );
+
+  const [expandedEvidence, setExpandedEvidence] = useState<Record<string, boolean>>({});
+
+  const toggleEvidence = (expId: string) => {
+    setExpandedEvidence(prev => ({ ...prev, [expId]: !prev[expId] }));
+  };
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
@@ -30,15 +49,27 @@ export default function Review() {
     return experiments
       .filter(e => e.status !== 'abandoned')
       .map(exp => {
-        const analysis = getExperimentRecommendation(exp, orders, tasks);
-        const expOrders = orders.filter(o => o.experimentId === exp.id);
+        const analysis = getExperimentAnalysis(exp.id);
+        const expOrders = getOrdersByExperiment(exp.id);
         const revenue = expOrders.filter(o => o.type === 'sale').reduce((s, o) => s + o.amount, 0);
         const refunds = expOrders.filter(o => o.type === 'refund').reduce((s, o) => s + o.amount, 0);
         const costs = expOrders.filter(o => o.type === 'cost').reduce((s, o) => s + (o.cost || o.amount), 0);
-        const expTasks = tasks.filter(t => t.experimentId === exp.id);
+        const expTasks = getTasksByExperiment(exp.id);
+        const expMetrics = getMetricsByExperiment(exp.id);
+        const avgMetricProgress = expMetrics.length > 0
+          ? (expMetrics.reduce((s, m) => s + (m.target > 0 ? Math.min(1, m.current / m.target) : 0), 0) / expMetrics.length) * 100
+          : 0;
+        const achievedMetrics = expMetrics.filter(m => m.current >= m.target).length;
         return {
           exp,
-          ...analysis,
+          recommendation: analysis?.recommendation || 'pause' as Recommendation,
+          score: analysis?.score ?? 50,
+          reasons: analysis?.reasons ?? ['综合评估'],
+          evidence: analysis?.evidence ?? [],
+          metrics: expMetrics,
+          avgMetricProgress,
+          achievedMetrics,
+          totalMetrics: expMetrics.length,
           revenue: revenue - refunds,
           cost: costs,
           profit: revenue - refunds - costs,
@@ -49,7 +80,7 @@ export default function Review() {
         };
       })
       .sort((a, b) => b.score - a.score);
-  }, [experiments, orders, tasks]);
+  }, [experiments, getExperimentAnalysis, getOrdersByExperiment, getTasksByExperiment, getMetricsByExperiment]);
 
   const selectedExperiments = experimentsWithAnalysis.filter(a => selectedIds.includes(a.exp.id));
 
@@ -225,6 +256,28 @@ export default function Review() {
                         <span className="font-mono text-xs text-slate-600">{a.exp.progress}%</span>
                       </div>
                     )},
+                    { label: '指标完成率', icon: Target, render: (a: any) => a.totalMetrics === 0 ? (
+                      <span className="text-sm text-slate-400">暂无指标</span>
+                    ) : (
+                      <div className="max-w-[150px] mx-auto">
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-1">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              a.avgMetricProgress >= 80
+                                ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
+                                : a.avgMetricProgress >= 50
+                                ? 'bg-gradient-to-r from-lab-indigo-400 to-lab-indigo-500'
+                                : 'bg-gradient-to-r from-lab-amber-400 to-lab-amber-500'
+                            }`}
+                            style={{ width: `${a.avgMetricProgress}%` }}
+                          ></div>
+                        </div>
+                        <div className="text-xs">
+                          <span className="font-mono text-slate-600">{a.avgMetricProgress.toFixed(0)}%</span>
+                          <span className="text-slate-400 ml-1">({a.achievedMetrics}/{a.totalMetrics}项)</span>
+                        </div>
+                      </div>
+                    )},
                     { label: '累计收入', icon: TrendingUp, render: (a: any) => (
                       <span className="font-mono font-bold text-emerald-600">¥{a.revenue.toFixed(2)}</span>
                     )},
@@ -327,11 +380,97 @@ export default function Review() {
                   ))}
                 </div>
 
+                {/* 证据链区域 */}
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <button
+                    onClick={() => toggleEvidence(a.exp.id)}
+                    className="w-full flex items-center justify-between mb-3 text-left group"
+                  >
+                    <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                      🔗 证据链
+                    </span>
+                    <span className="text-slate-400 group-hover:text-slate-600 transition-colors">
+                      {expandedEvidence[a.exp.id]
+                        ? <ChevronUp className="w-4 h-4" />
+                        : <ChevronDown className="w-4 h-4" />}
+                    </span>
+                  </button>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {a.evidence.map((ev: RecommendationEvidence, idx: number) => {
+                      const meta = EVIDENCE_CATEGORY_META[ev.category] || { emoji: '📋' };
+                      return (
+                        <span
+                          key={idx}
+                          title={`${meta.emoji} ${ev.label}\n${ev.points.join('\n')}`}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border-2 text-[11px] font-medium cursor-help transition-all hover:scale-105 ${
+                            ev.positive
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                              : 'border-coral-300 bg-coral-50 text-coral-700'
+                          }`}
+                        >
+                          <span>{meta.emoji}</span>
+                          <span>{ev.label}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  {expandedEvidence[a.exp.id] && (
+                    <div className="mt-3 space-y-2">
+                      {a.evidence.map((ev: RecommendationEvidence, idx: number) => {
+                        const meta = EVIDENCE_CATEGORY_META[ev.category] || { emoji: '📋' };
+                        return (
+                          <div
+                            key={idx}
+                            className={`rounded-xl border-2 p-3 ${
+                              ev.positive
+                                ? 'border-emerald-200 bg-emerald-50/60'
+                                : 'border-coral-200 bg-coral-50/60'
+                            }`}
+                          >
+                            <div className={`text-xs font-bold mb-1.5 flex items-center gap-1 ${
+                              ev.positive ? 'text-emerald-700' : 'text-coral-700'
+                            }`}>
+                              <span>{meta.emoji}</span>
+                              <span>{ev.label}</span>
+                              <span className={`ml-auto px-1.5 py-0.5 rounded-full text-[10px] ${
+                                ev.positive
+                                  ? 'bg-emerald-200 text-emerald-800'
+                                  : 'bg-coral-200 text-coral-800'
+                              }`}>
+                                {ev.positive ? '正面' : '负面'}
+                              </span>
+                            </div>
+                            <ul className="space-y-1">
+                              {ev.points.map((pt, pi) => (
+                                <li key={pi} className="text-xs text-slate-600 flex items-start gap-1.5">
+                                  <span className={`w-1 h-1 rounded-full mt-1.5 shrink-0 ${
+                                    ev.positive ? 'bg-emerald-400' : 'bg-coral-400'
+                                  }`}></span>
+                                  <span>{pt}</span>
+                                </li>
+                              ))}
+                              {ev.points.length === 0 && (
+                                <li className="text-xs text-slate-400 italic">暂无明细</li>
+                              )}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {a.exp.status === 'in_progress' && (
                   <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
                     {a.recommendation !== 'continue' && (
                       <button
-                        onClick={() => updateExperiment(a.exp.id, { status: 'paused' })}
+                        onClick={() => {
+                          if (confirm('确认暂停此实验？暂停后可随时重新启动。')) {
+                            updateExperiment(a.exp.id, { status: 'paused' });
+                          }
+                        }}
                         className="flex-1 lab-btn-secondary !py-1.5 !text-xs !text-amber-700 !border-amber-300 hover:!bg-amber-50"
                       >
                         <Pause className="w-3 h-3" />
@@ -341,7 +480,7 @@ export default function Review() {
                     {a.recommendation === 'abandon' && (
                       <button
                         onClick={() => {
-                          if (confirm('确认放弃此实验？')) {
+                          if (confirm('确认放弃此实验？此操作不可撤销。')) {
                             updateExperiment(a.exp.id, { status: 'abandoned' });
                           }
                         }}

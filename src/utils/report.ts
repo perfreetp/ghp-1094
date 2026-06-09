@@ -1,7 +1,8 @@
 import {
-  Idea, Experiment, Task, ChannelRecord, Interview, Order, Material
+  Idea, Experiment, Task, ChannelRecord, Interview, Order, Material, Metric
 } from '@/types';
 import { formatDate, getWeekRange, isThisWeek } from './date';
+import { calculateBreakdown, computeMetricStatus } from './finance';
 
 interface ReportData {
   ideas: Idea[];
@@ -11,6 +12,7 @@ interface ReportData {
   interviews: Interview[];
   orders: Order[];
   materials: Material[];
+  metrics?: Metric[];
 }
 
 export function generateWeeklyReport(data: ReportData): string {
@@ -27,27 +29,21 @@ export function generateWeeklyReport(data: ReportData): string {
   const pendingTasks = weekTasks.filter(t => t.status !== 'completed');
 
   const weekOrders = data.orders.filter(o => isThisWeek(o.date));
-  const revenue = weekOrders
-    .filter(o => o.type === 'sale')
-    .reduce((sum, o) => sum + o.amount, 0);
-  const refunds = weekOrders
-    .filter(o => o.type === 'refund')
-    .reduce((sum, o) => sum + o.amount, 0);
-  const costs = weekOrders
-    .filter(o => o.type === 'cost')
-    .reduce((sum, o) => sum + (o.cost || o.amount), 0);
-  const profit = revenue - refunds - costs;
+  const fin = calculateBreakdown(weekOrders, 'all');
 
   const weekChannelRecords = data.channelRecords.filter(r => isThisWeek(r.date));
   const weekInterviews = data.interviews.filter(i => isThisWeek(i.date));
 
+  const weekMetrics = (data.metrics || []).filter(m =>
+    weekExperiments.some(e => e.id === m.experimentId)
+  );
+
   const topExperiments = data.experiments
     .filter(e => e.status === 'in_progress')
     .map(exp => {
-      const expRevenue = data.orders
-        .filter(o => o.experimentId === exp.id && o.type === 'sale' && isThisWeek(o.date))
-        .reduce((s, o) => s + o.amount, 0);
-      return { ...exp, revenue: expRevenue };
+      const expWeekOrders = data.orders.filter(o => o.experimentId === exp.id && isThisWeek(o.date));
+      const expFin = calculateBreakdown(expWeekOrders, 'all');
+      return { ...exp, revenue: expFin.revenue, profit: expFin.profit };
     })
     .sort((a, b) => b.revenue - a.revenue);
 
@@ -56,15 +52,35 @@ export function generateWeeklyReport(data: ReportData): string {
   report += `---\n\n`;
 
   report += `## 💰 本周财务概览\n\n`;
-  report += `| 指标 | 金额 |\n|------|------|\n| 💰 总收入 | ¥${revenue.toFixed(2)} |\n| 💸 退款 | ¥${refunds.toFixed(2)} |\n| 📦 成本支出 | ¥${costs.toFixed(2)} |\n| 📈 净利润 | **¥${profit.toFixed(2)}** |\n| 🧾 成交订单数 | ${weekOrders.filter(o => o.type === 'sale').length} 单 |\n\n`;
+  report += `| 指标 | 金额 |\n|------|------|\n| 💰 销售收入 | ¥${fin.sales.toFixed(2)} |\n| 💸 退款金额 | ¥${fin.refunds.toFixed(2)} |\n| 📦 成本支出 | ¥${fin.costs.toFixed(2)} |\n| 🧮 净收入（收入-退款） | ¥${fin.revenue.toFixed(2)} |\n| 📈 净利润（净收入-成本） | **¥${fin.profit.toFixed(2)}** |\n| 🧾 成交订单数 | ${fin.orderCount} 单 |\n| 🔄 退款率 | ${fin.refundRate.toFixed(1)}% |\n| 💵 客单价 | ¥${fin.avgOrderValue.toFixed(2)} |\n\n`;
 
   report += `## 🧪 进行中实验\n\n`;
   if (topExperiments.length === 0) {
     report += `> 暂无进行中的实验\n\n`;
   } else {
-    report += `| 实验名称 | 进度 | 本周收入 | 状态 |\n|----------|------|----------|------|\n`;
+    report += `| 实验名称 | 进度 | 本周净收入 | 本周净利润 | 状态 |\n|----------|------|------------|------------|------|\n`;
     topExperiments.forEach(e => {
-      report += `| ${e.title} | ${e.progress}% | ¥${e.revenue.toFixed(2)} | ${e.status === 'in_progress' ? '进行中' : e.status} |\n`;
+      const statusText: Record<string, string> = {
+        draft: '草稿', in_progress: '进行中', paused: '暂停',
+        completed: '完成', abandoned: '放弃'
+      };
+      report += `| ${e.title} | ${e.progress}% | ¥${e.revenue.toFixed(2)} | ¥${e.profit.toFixed(2)} | ${statusText[e.status] || e.status} |\n`;
+    });
+    report += `\n`;
+  }
+
+  if (weekMetrics.length > 0) {
+    report += `## 📏 验证指标周报\n\n`;
+    report += `| 指标名称 | 所属实验 | 目标 | 当前 | 完成率 | 状态 | 截止日期 |\n|----------|----------|------|------|--------|------|----------|\n`;
+    weekMetrics.forEach(m => {
+      const exp = data.experiments.find(e => e.id === m.experimentId);
+      const ratio = m.target > 0 ? Math.min(100, m.current / m.target * 100) : 0;
+      const st = computeMetricStatus(m);
+      const statusText: Record<string, string> = {
+        pending: '⏳ 待启动', on_track: '✅ 正常', achieved: '🏆 已达标',
+        at_risk: '⚠️ 有风险', failed: '❌ 未达标'
+      };
+      report += `| ${m.name} | ${exp?.title || '-'} | ${m.target}${m.unit || ''} | ${m.current}${m.unit || ''} | ${ratio.toFixed(0)}% | ${statusText[st] || st} | ${m.deadline ? formatDate(m.deadline) : '-'} |\n`;
     });
     report += `\n`;
   }

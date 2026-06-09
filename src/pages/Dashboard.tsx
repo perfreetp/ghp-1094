@@ -1,9 +1,8 @@
-import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FlaskConical, TrendingUp, CheckSquare, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Play, Clock, XCircle,
-  DollarSign, Target, Calendar, AlertCircle
+  DollarSign, Target, Calendar, AlertCircle, Calculator
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -138,8 +137,7 @@ function ExperimentCard({ exp, onClick }: { exp: Experiment; onClick: () => void
 export default function Dashboard() {
   const navigate = useNavigate();
   const getActiveExperiments = useAppStore((s) => s.getActiveExperiments);
-  const getMonthlyRevenue = useAppStore((s) => s.getMonthlyRevenue);
-  const getTotalRevenue = useAppStore((s) => s.getTotalRevenue);
+  const getFinance = useAppStore((s) => s.getFinance);
   const getTodayTasks = useAppStore((s) => s.getTodayTasks);
   const getRisks = useAppStore((s) => s.getRisks);
   const getRevenueTrend = useAppStore((s) => s.getRevenueTrend);
@@ -147,24 +145,18 @@ export default function Dashboard() {
   const experiments = useAppStore((s) => s.experiments);
 
   const activeExps = getActiveExperiments();
-  const monthlyRevenue = getMonthlyRevenue();
-  const totalRevenue = getTotalRevenue();
+  const monthFinance = getFinance('month');
+  const allFinance = getFinance('all');
   const todayTasks = getTodayTasks();
   const risks = getRisks();
   const revenueTrend = getRevenueTrend(30);
   const todoCount = todayTasks.length;
   const riskCount = risks.length;
 
-  const totalProfit = useMemo(() => {
-    const orders = useAppStore.getState().orders;
-    const costs = orders
-      .filter((o) => o.type === 'cost')
-      .reduce((s, o) => s + (o.cost || o.amount), 0);
-    const refunds = orders
-      .filter((o) => o.type === 'refund')
-      .reduce((s, o) => s + o.amount, 0);
-    return totalRevenue - costs - refunds;
-  }, [totalRevenue]);
+  const monthlyRevenue = monthFinance.revenue;
+  const monthlyProfit = monthFinance.profit;
+  const totalRevenue = allFinance.revenue;
+  const totalProfit = allFinance.profit;
 
   const priorityColors: Record<string, string> = {
     high: 'bg-coral-500',
@@ -226,11 +218,19 @@ export default function Dashboard() {
         />
         <StatCard
           icon={DollarSign}
-          label="本月收入"
+          label="本月净收入"
           value={`¥${monthlyRevenue.toFixed(0)}`}
           subValue={monthlyRevenue > 0 ? '增长中' : '新的开始'}
           trend={monthlyRevenue > 0 ? 'up' : 'neutral'}
           color="#10b981"
+        />
+        <StatCard
+          icon={Calculator}
+          label="本月净利润"
+          value={`¥${monthlyProfit.toFixed(0)}`}
+          subValue={monthlyProfit >= 0 ? '正向盈利' : '亏损中'}
+          trend={monthlyProfit >= 0 ? 'up' : 'down'}
+          color={monthlyProfit >= 0 ? '#0d9488' : '#ef4444'}
         />
         <StatCard
           icon={CheckSquare}
@@ -239,14 +239,6 @@ export default function Dashboard() {
           subValue={todoCount > 3 ? '任务较多' : '节奏不错'}
           trend={todoCount > 3 ? 'down' : 'up'}
           color="#f59e0b"
-        />
-        <StatCard
-          icon={AlertTriangle}
-          label="风险提醒"
-          value={String(riskCount)}
-          subValue={riskCount > 0 ? '需关注' : '无风险'}
-          trend={riskCount > 0 ? 'down' : 'up'}
-          color="#ef4444"
         />
       </div>
 

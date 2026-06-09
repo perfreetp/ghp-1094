@@ -1,4 +1,4 @@
-import { Idea, Experiment, Task, ChannelRecord, Interview, Order, Material } from '@/types';
+import { Idea, Experiment, Task, ChannelRecord, Interview, Order, Material, Metric } from '@/types';
 
 const today = new Date();
 const daysAgo = (n: number) => new Date(today.getTime() - n * 86400000).toISOString();
@@ -357,5 +357,62 @@ export const initialMaterials: Material[] = [
     content: '封面配色：\n主色：深靛蓝 #1e3a5f（专业感）\n强调色：琥珀橙 #f59e0b（吸引眼球）\n辅助色：浅灰蓝 #dbeafe（背景）\n\n字体搭配：\n标题：思源黑体 Bold 48px\n副标题：思源黑体 Regular 32px\n数字：等宽字体 64px 琥珀橙色',
     tags: ['小红书', '封面', '设计'],
     createdAt: daysAgo(20)
+  }
+];
+
+export const initialMetrics: Metric[] = [
+  {
+    id: 'met-1',
+    experimentId: 'exp-1',
+    name: '首批购买用户',
+    unit: '人',
+    target: 50,
+    current: 11,
+    deadline: daysLater(40)
+  },
+  {
+    id: 'met-2',
+    experimentId: 'exp-1',
+    name: '小红书爆款笔记（>5000曝光）',
+    unit: '篇',
+    target: 5,
+    current: 1,
+    deadline: daysLater(40)
+  },
+  {
+    id: 'met-3',
+    experimentId: 'exp-1',
+    name: '净利润',
+    unit: '元',
+    target: 1000,
+    current: 391,
+    deadline: daysLater(40)
+  },
+  {
+    id: 'met-4',
+    experimentId: 'exp-2',
+    name: '种子用户招募',
+    unit: '人',
+    target: 3,
+    current: 1,
+    deadline: daysLater(18)
+  },
+  {
+    id: 'met-5',
+    experimentId: 'exp-2',
+    name: '用户访谈完成',
+    unit: '场',
+    target: 5,
+    current: 1,
+    deadline: daysLater(18)
+  },
+  {
+    id: 'met-6',
+    experimentId: 'exp-3',
+    name: '总成交单量',
+    unit: '单',
+    target: 30,
+    current: 2,
+    deadline: daysAgo(10)
   }
 ];

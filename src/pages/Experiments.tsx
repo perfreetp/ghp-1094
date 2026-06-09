@@ -32,6 +32,7 @@ export default function Experiments() {
   const getExperimentProfit = useAppStore((s) => s.getExperimentProfit);
   const getTasksByExperiment = useAppStore((s) => s.getTasksByExperiment);
   const getOrdersByExperiment = useAppStore((s) => s.getOrdersByExperiment);
+  const getMetricsByExperiment = useAppStore((s) => s.getMetricsByExperiment);
 
   const [filter, setFilter] = useState<ExperimentStatus | 'all'>('all');
 
@@ -62,10 +63,24 @@ export default function Experiments() {
   const getStats = (exp: Experiment) => {
     const tasks = getTasksByExperiment(exp.id);
     const orders = getOrdersByExperiment(exp.id);
+    const metrics = getMetricsByExperiment(exp.id);
     const profit = getExperimentProfit(exp.id);
     const completedTasks = tasks.filter((t) => t.status === 'completed').length;
     const sales = orders.filter((o) => o.type === 'sale').length;
-    return { profit, completedTasks, totalTasks: tasks.length, sales };
+    const achievedMetrics = metrics.filter((m) => m.current >= m.target).length;
+    const avgMetricProgress = metrics.length > 0
+      ? (metrics.reduce((s, m) => s + (m.target > 0 ? Math.min(1, m.current / m.target) : 0), 0) / metrics.length) * 100
+      : 0;
+    return {
+      profit,
+      completedTasks,
+      totalTasks: tasks.length,
+      sales,
+      metrics,
+      achievedMetrics,
+      totalMetrics: metrics.length,
+      avgMetricProgress,
+    };
   };
 
   return (
@@ -221,6 +236,32 @@ export default function Experiments() {
                     </div>
                   </div>
                 </div>
+
+                {/* 验证指标摘要 */}
+                {stats.totalMetrics > 0 && (
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-slate-500 flex items-center gap-1">
+                        📏 验证指标
+                      </span>
+                      <span className="font-mono font-bold text-slate-700">
+                        {stats.achievedMetrics}项已达标 / 共{stats.totalMetrics}项 ({stats.avgMetricProgress.toFixed(0)}%)
+                      </span>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          stats.avgMetricProgress >= 80
+                            ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
+                            : stats.avgMetricProgress >= 50
+                            ? 'bg-gradient-to-r from-lab-indigo-400 to-lab-indigo-500'
+                            : 'bg-gradient-to-r from-lab-amber-400 to-lab-amber-500'
+                        }`}
+                        style={{ width: `${stats.avgMetricProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
 
                 <button className="absolute top-5 right-5 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all">
                   <MoreHorizontal className="w-4 h-4" />
