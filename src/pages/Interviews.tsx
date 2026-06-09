@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Interview } from '@/types';
-import { formatDate } from '@/utils/date';
+import { formatDate, toSafeISODate, toDateInputValue, isValidDateInput } from '@/utils/date';
 
 export default function Interviews() {
   const interviews = useAppStore((s) => s.interviews);
@@ -20,7 +20,7 @@ export default function Interviews() {
     experimentId: '' as string,
     interviewee: '',
     contactInfo: '',
-    date: new Date().toISOString().split('T')[0],
+    date: toDateInputValue(),
     questionsText: '',
     notes: '',
   });
@@ -61,7 +61,7 @@ export default function Interviews() {
       experimentId: form.experimentId || null,
       interviewee: form.interviewee,
       contactInfo: form.contactInfo || undefined,
-      date: new Date(form.date).toISOString(),
+      date: toSafeISODate(form.date),
       questions,
       notes: form.notes,
     });
@@ -70,7 +70,7 @@ export default function Interviews() {
       experimentId: '',
       interviewee: '',
       contactInfo: '',
-      date: new Date().toISOString().split('T')[0],
+      date: toDateInputValue(),
       questionsText: '',
       notes: '',
     });

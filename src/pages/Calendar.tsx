@@ -5,7 +5,7 @@ import {
   Clock, AlertTriangle, Edit3, Trash2, X
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { getMonthCalendar, formatDate, generateId, isToday, isOverdue } from '@/utils/date';
+import { getMonthCalendar, formatDate, generateId, isToday, isOverdue, toSafeISODate, toDateInputValue, isValidDateInput } from '@/utils/date';
 import { Task, TaskStage, TaskPriority } from '@/types';
 
 const stageColors: Record<TaskStage, string> = {
@@ -75,7 +75,7 @@ export default function CalendarPage() {
         stage: task.stage,
         priority: task.priority,
         experimentId: task.experimentId || '',
-        dueDate: task.dueDate.split('T')[0],
+        dueDate: toDateInputValue(task.dueDate),
         notes: task.notes || '',
       });
     } else {
@@ -85,7 +85,7 @@ export default function CalendarPage() {
         stage: 'preparation',
         priority: 'medium',
         experimentId: '',
-        dueDate: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        dueDate: date ? toDateInputValue(date.toISOString()) : toDateInputValue(),
         notes: '',
       });
     }
@@ -94,13 +94,16 @@ export default function CalendarPage() {
 
   const handleSave = () => {
     if (!form.title.trim()) return;
+    if (!isValidDateInput(form.dueDate)) {
+      form.dueDate = toDateInputValue();
+    }
     if (editingTask) {
       updateTask(editingTask.id, {
         title: form.title,
         stage: form.stage,
         priority: form.priority,
         experimentId: form.experimentId || null,
-        dueDate: new Date(form.dueDate).toISOString(),
+        dueDate: toSafeISODate(form.dueDate),
         notes: form.notes,
       });
     } else {
@@ -109,7 +112,7 @@ export default function CalendarPage() {
         stage: form.stage,
         priority: form.priority,
         experimentId: form.experimentId || null,
-        dueDate: new Date(form.dueDate).toISOString(),
+        dueDate: toSafeISODate(form.dueDate),
         status: 'pending',
         notes: form.notes,
       };

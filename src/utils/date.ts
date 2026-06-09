@@ -89,3 +89,37 @@ export function getMonthCalendar(year: number, month: number): (Date | null)[][]
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
+
+export function todayDateInput(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function toDateInputValue(isoStr?: string | null): string {
+  if (!isoStr) return todayDateInput();
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return todayDateInput();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function toSafeISODate(input?: string | null, fallback?: Date): string {
+  const fallbackDate = fallback || new Date();
+  if (!input || input.trim() === '') return fallbackDate.toISOString();
+  try {
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return fallbackDate.toISOString();
+    return d.toISOString();
+  } catch {
+    return fallbackDate.toISOString();
+  }
+}
+
+export function isValidDateInput(input?: string | null): boolean {
+  if (!input || input.trim() === '') return false;
+  try {
+    const d = new Date(input);
+    return !isNaN(d.getTime());
+  } catch {
+    return false;
+  }
+}

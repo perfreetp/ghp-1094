@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { ChannelRecord, ChannelType } from '@/types';
-import { formatDate } from '@/utils/date';
+import { formatDate, toSafeISODate, toDateInputValue, isValidDateInput } from '@/utils/date';
 
 const typeConfig: Record<ChannelType, { label: string; icon: any; color: string; bg: string; border: string }> = {
   post: { label: '发帖记录', icon: Send, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200' },
@@ -35,7 +35,7 @@ export default function Channels() {
     conversions: '' as string,
     budget: '' as string,
     feedback: '',
-    date: new Date().toISOString().split('T')[0],
+    date: toDateInputValue(),
   });
 
   const filtered = channelRecords.filter(
@@ -61,7 +61,7 @@ export default function Channels() {
       type: form.type,
       platform: form.platform,
       content: form.content,
-      date: new Date(form.date).toISOString(),
+      date: toSafeISODate(form.date),
       metrics: {
         views: form.views ? Number(form.views) : undefined,
         likes: form.likes ? Number(form.likes) : undefined,
@@ -85,7 +85,7 @@ export default function Channels() {
       conversions: '',
       budget: '',
       feedback: '',
-      date: new Date().toISOString().split('T')[0],
+      date: toDateInputValue(),
     });
   };
 

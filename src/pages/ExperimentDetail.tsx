@@ -6,7 +6,7 @@ import {
   Play, Pause, CheckCircle2, FileX, Loader, Ruler
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { formatDate } from '@/utils/date';
+import { formatDate, toSafeISODate, toDateInputValue, isValidDateInput } from '@/utils/date';
 import { computeMetricStatus } from '@/utils/finance';
 import { ExperimentStatus, TaskStage, TaskPriority, Task, Metric, MetricStatus } from '@/types';
 
@@ -94,7 +94,16 @@ export default function ExperimentDetail() {
   }
 
   const handleSave = () => {
-    updateExperiment(experiment.id, form);
+    const saveForm = { ...form };
+    if (!isValidDateInput(saveForm.startDate)) {
+      saveForm.startDate = toDateInputValue();
+    }
+    if (!isValidDateInput(saveForm.endDate)) {
+      saveForm.endDate = toDateInputValue();
+    }
+    saveForm.startDate = toSafeISODate(saveForm.startDate);
+    saveForm.endDate = toSafeISODate(saveForm.endDate);
+    updateExperiment(experiment.id, saveForm);
     setEditing(false);
   };
 
@@ -104,13 +113,16 @@ export default function ExperimentDetail() {
 
   const handleAddTask = () => {
     if (!newTask.title.trim()) return;
+    if (!isValidDateInput(newTask.dueDate)) {
+      newTask.dueDate = toDateInputValue();
+    }
     const task: Omit<Task, 'id'> = {
       experimentId: experiment.id,
       title: newTask.title,
       stage: newTask.stage,
       priority: newTask.priority,
       status: 'pending',
-      dueDate: newTask.dueDate || new Date().toISOString(),
+      dueDate: toSafeISODate(newTask.dueDate),
     };
     addTask(task);
     setNewTask({ title: '', stage: 'preparation', priority: 'medium', dueDate: '' });
@@ -138,20 +150,23 @@ export default function ExperimentDetail() {
       unit: metric.unit || '',
       target: metric.target,
       current: metric.current,
-      deadline: metric.deadline ? metric.deadline.split('T')[0] : '',
+      deadline: metric.deadline ? toDateInputValue(metric.deadline) : '',
     });
     setShowMetricModal(true);
   };
 
   const handleSaveMetric = () => {
     if (!metricForm.name.trim()) return;
+    const deadlineValue = metricForm.deadline && metricForm.deadline.trim() !== ''
+      ? toSafeISODate(metricForm.deadline)
+      : undefined;
     if (editingMetric) {
       updateMetric(editingMetric.id, {
         name: metricForm.name.trim(),
         unit: metricForm.unit.trim() || undefined,
         target: Number(metricForm.target),
         current: Number(metricForm.current),
-        deadline: metricForm.deadline ? new Date(metricForm.deadline).toISOString() : undefined,
+        deadline: deadlineValue,
       });
     } else {
       const newMetric: Omit<Metric, 'id'> = {
@@ -160,7 +175,7 @@ export default function ExperimentDetail() {
         unit: metricForm.unit.trim() || undefined,
         target: Number(metricForm.target),
         current: Number(metricForm.current),
-        deadline: metricForm.deadline ? new Date(metricForm.deadline).toISOString() : undefined,
+        deadline: deadlineValue,
       };
       addMetric(newMetric);
     }
@@ -359,8 +374,8 @@ export default function ExperimentDetail() {
                 {editing ? (
                   <input
                     type="date"
-                    value={form.startDate?.split('T')[0]}
-                    onChange={(e) => setForm({ ...form, startDate: new Date(e.target.value).toISOString() })}
+                    value={toDateInputValue(form.startDate)}
+                    onChange={(e) => setForm({ ...form, startDate: e.target.value })}
                     className="lab-input"
                   />
                 ) : (
@@ -564,8 +579,8 @@ export default function ExperimentDetail() {
             </select>
             <input
               type="date"
-              value={newTask.dueDate.split('T')[0]}
-              onChange={(e) => setNewTask({ ...newTask, dueDate: new Date(e.target.value).toISOString() })}
+              value={newTask.dueDate}
+              onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
               className="lab-input md:col-span-2"
             />
             <button

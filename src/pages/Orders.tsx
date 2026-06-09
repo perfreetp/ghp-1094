@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Order, OrderType } from '@/types';
-import { formatDate } from '@/utils/date';
+import { formatDate, toSafeISODate, toDateInputValue, isValidDateInput } from '@/utils/date';
 
 const typeConfig: Record<OrderType, { label: string; icon: any; color: string; bg: string; sign: string }> = {
   sale: { label: '销售收入', icon: TrendingUp, color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', sign: '+' },
@@ -29,7 +29,7 @@ export default function Orders() {
     amount: '',
     cost: '',
     experimentId: '' as string,
-    date: new Date().toISOString().split('T')[0],
+    date: toDateInputValue(),
     status: '',
     note: '',
     customerName: '',
@@ -71,7 +71,7 @@ export default function Orders() {
       amount: Number(form.amount),
       cost: form.cost ? Number(form.cost) : undefined,
       experimentId: form.experimentId || null,
-      date: new Date(form.date).toISOString(),
+      date: toSafeISODate(form.date),
       status: form.status || defaultStatus,
       note: form.note || undefined,
       customerName: form.customerName || undefined,
@@ -82,7 +82,7 @@ export default function Orders() {
       amount: '',
       cost: '',
       experimentId: '',
-      date: new Date().toISOString().split('T')[0],
+      date: toDateInputValue(),
       status: '',
       note: '',
       customerName: '',
